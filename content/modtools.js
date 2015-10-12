@@ -38,12 +38,30 @@ var httpRequestObserver =
             }
 
             var cookie = '';
-            try {
-                cookie = httpChannel.getRequestHeader("Cookie");
-            } catch (e) {
+
+            var cookieMgr = Components.classes["@mozilla.org/cookiemanager;1"]
+                .getService(Components.interfaces.nsICookieManager);
+
+            var added = {};
+
+            for (var e = cookieMgr.enumerator; e.hasMoreElements();) {
+                var cookieval = e.getNext().QueryInterface(Components.interfaces.nsICookie);
+
+                if (((cookieval.host == '.yahoo.com') || (cookieval.host == 'groups.yahoo.com')) &&
+                    (cookieval.host.indexOf("analytics") === -1) &&
+                    (cookieval.host.indexOf("help") === -1) &&
+                    (cookieval.host.indexOf("mail") === -1) &&
+                    (cookieval.name.indexOf("ywadp") === -1) &&
+                    (cookieval.name.indexOf("fpc100") === -1) &&
+                    (cookieval.name.indexOf("__utm") === -1) &&
+                    (!added[cookieval.name])) {
+                    //log(cookieval.host);
+                    cookie += cookieval.name + "=" + cookieval.value + "; ";
+                    added[cookieval.name] = true;
+                }
             }
 
-            //log("Request method " + httpChannel.requestMethod);
+            log("Cookies " + cookie);
 
             if (((subject.originalURI.spec.indexOf("groups.yahoo.com/") !== -1) ||
                 (subject.originalURI.spec.indexOf("direct.ilovefreegle.org/") !== -1)) &&
@@ -60,12 +78,12 @@ var httpRequestObserver =
                     // Get the data.
                     log("PUT/DELETE");
                     var wd = window.content.document;
-                    var args = wd.getElementById('#modtoolsreq').innerHTML;
+                    var args = wd.getElementById('modtoolsreq').innerHTML;
                     log("Args " + args);
 
                     if (args.length > 0) {
                         args = JSON.parse(args);
-                        log("Parsed", args);
+                        log("Parsed" + args);
 
                         // Suspend the original request to make sure it doesn't complete
                         // until we're done.
@@ -79,7 +97,7 @@ var httpRequestObserver =
                             var wd = window.content.document;
                             var rsp = JSON.stringify(ret);
                             log("Response " + rsp);
-                            wd.getElementById('#modtoolsreq').innerHTML = rsp;
+                            wd.getElementById('modtoolsreq').innerHTML = rsp;
 
                             // Now make the original request complete.
                             log("cancel");
@@ -90,7 +108,7 @@ var httpRequestObserver =
 
                         args.error = function (request, status, error) {
                             // We failed.  Just cancel the request
-                            log("Failed");
+                            log("Failed " + status + " " + error);
                             log("cancel");
                             subject.cancel(0x804b0002);
                             log('resume');
@@ -98,37 +116,11 @@ var httpRequestObserver =
                         }
 
                         log("Call ajax");
-                        ajaxRequest(args.type, args.url, args.success, args.error)
+                        ajaxRequest(args.type, args.url, args.data, cookie, args.success, args.error)
                     } else {
                         log("No request passed");
                     }
                 } else {
-                    var cookie = '';
-
-                    var cookieMgr = Components.classes["@mozilla.org/cookiemanager;1"]
-                        .getService(Components.interfaces.nsICookieManager);
-
-                    var added = {};
-
-                    for (var e = cookieMgr.enumerator; e.hasMoreElements();) {
-                        var cookieval = e.getNext().QueryInterface(Components.interfaces.nsICookie);
-
-                        if (((cookieval.host == '.yahoo.com') || (cookieval.host == 'groups.yahoo.com')) &&
-                            (cookieval.host.indexOf("analytics") === -1) &&
-                            (cookieval.host.indexOf("help") === -1) &&
-                            (cookieval.host.indexOf("mail") === -1) &&
-                            (cookieval.name.indexOf("ywadp") === -1) &&
-                            (cookieval.name.indexOf("fpc100") === -1) &&
-                            (cookieval.name.indexOf("__utm") === -1) &&
-                            (!added[cookieval.name])) {
-                            //log(cookieval.host);
-                            cookie += cookieval.name + "=" + cookieval.value + "; ";
-                            added[cookieval.name] = true;
-                        }
-                    }
-
-                    log("Cookies " + cookie);
-
                     httpChannel.setRequestHeader("Cookie", cookie, false);
                     httpChannel.setRequestHeader("Origin", null, false);
                     httpChannel.setRequestHeader("Referer", null, false);
@@ -195,23 +187,29 @@ function contentLoaded(event) {
     log("contentLoaded");
     var wd = window.content.document;
 
-    // Get version
-    Components.utils.import("resource://gre/modules/AddonManager.jsm");
+    if (wd.getElementById('modtoolsfirefox') == null) {
+        // Get version
+        Components.utils.import("resource://gre/modules/AddonManager.jsm");
 
-    AddonManager.getAddonByID("ModToolsUnlisted@edwardhibbert", function (addon) {
-        var wd = window.content.document;
-        var version = addon.version;
-        var div = wd.createElement('div');
-        div.style.display = 'none';
-        div.id = 'modtoolsfirefox';
-        div.innerHTML = version;
-        wd.body.appendChild(div);
-    });
+        AddonManager.getAddonByID("ModToolsUnlisted@edwardhibbert", function (addon) {
+            var wd = window.content.document;
+            var version = addon.version;
+            var div = wd.createElement('div');
+            div.style.display = 'none';
+            div.id = 'modtoolsfirefox';
+            div.innerHTML = version;
+            wd.body.appendChild(div);
+        });
+    }
 }
 
-function ajaxRequest(verb, url, success, error) {
+function ajaxRequest(verb, url, data, cookies, success, error) {
     var xhr = new XMLHttpRequest();
     xhr.open(verb, url, true);
+    //xhr.setRequestHeader('Cookie', cookies);
+    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
+    var encoded = encodeURIComponent(JSON.stringify(data));
+    xhr.setRequestHeader('Content-Length', encoded.length);
     xhr.onload = function (e) {
         if (xhr.readyState === 4) {
             if (xhr.status === 200) {
@@ -224,7 +222,7 @@ function ajaxRequest(verb, url, success, error) {
     xhr.onerror = function (e) {
         error(xhr, xhr.statusText, null);
     };
-    xhr.send(null);
+    xhr.send(data);
 }
 
 function contentLoad(event) {
